@@ -1,0 +1,18 @@
+{
+  "name": "會議錄音轉寫",
+  "short_name": "會議轉寫",
+  "description": "上傳會議錄音，送進自架的 whisper 轉寫與會議紀錄流程，看進度並讀結果。",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#f4f5f7",
+  "theme_color": "#1f2933",
+  "icons": [
+    {
+      "src": "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192'%3E%3Crect width='192' height='192' rx='40' fill='%231f2933'/%3E%3Cpath d='M96 44a18 18 0 0 1 18 18v34a18 18 0 0 1-36 0V62a18 18 0 0 1 18-18zM64 92a6 6 0 0 1 12 0 20 20 0 0 0 40 0 6 6 0 0 1 12 0 32 32 0 0 1-26 31.4V140h14a6 6 0 0 1 0 12H76a6 6 0 0 1 0-12h14v-16.6A32 32 0 0 1 64 92z' fill='%23fff'/%3E%3C/svg%3E",
+      "sizes": "192x192",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}

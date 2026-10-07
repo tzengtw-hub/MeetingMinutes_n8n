@@ -1,0 +1,368 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>會議錄音轉寫</title>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#1f2933">
+<style>
+  :root{
+    --bg:#f4f5f7; --card:#fff; --ink:#1f2933; --muted:#6b7280; --line:#e2e5ea;
+    --accent:#2563eb; --ok:#15803d; --warn:#b45309; --err:#b91c1c;
+  }
+  @media (prefers-color-scheme:dark){
+    :root{ --bg:#15181d; --card:#1e2228; --ink:#e8eaed; --muted:#9aa3af; --line:#2d333b; }
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+       font-family:system-ui,-apple-system,"Noto Sans TC",sans-serif;
+       line-height:1.6;padding:16px;padding-bottom:40px}
+  .wrap{max-width:720px;margin:0 auto}
+  h1{font-size:19px;margin:4px 0 16px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;
+        padding:16px;margin-bottom:14px}
+  label{display:block;font-size:13px;color:var(--muted);margin:10px 0 4px}
+  input[type=text],input[type=password]{width:100%;padding:9px 11px;border:1px solid var(--line);
+        border-radius:8px;background:var(--bg);color:var(--ink);font-size:15px}
+  button{appearance:none;border:0;border-radius:8px;padding:10px 16px;font-size:15px;
+         background:var(--accent);color:#fff;cursor:pointer}
+  button.ghost{background:transparent;color:var(--muted);border:1px solid var(--line)}
+  button:disabled{opacity:.5;cursor:default}
+  .drop{border:2px dashed var(--line);border-radius:12px;padding:28px 16px;text-align:center;
+        color:var(--muted);cursor:pointer}
+  .drop.over{border-color:var(--accent);color:var(--accent)}
+  .bar{height:8px;background:var(--line);border-radius:999px;overflow:hidden;margin:10px 0 6px}
+  .bar>i{display:block;height:100%;background:var(--accent);width:0;transition:width .4s}
+  .bar.est>i{background:repeating-linear-gradient(90deg,var(--accent) 0 8px,transparent 8px 16px)}
+  .row{display:flex;justify-content:space-between;gap:10px;font-size:13px;color:var(--muted)}
+  .pill{display:inline-block;font-size:12px;padding:2px 9px;border-radius:999px;
+        background:var(--line);color:var(--ink)}
+  .pill.run{background:#dbeafe;color:#1e40af}
+  .pill.ok{background:#dcfce7;color:var(--ok)}
+  .pill.err{background:#fee2e2;color:var(--err)}
+  .warn{color:var(--warn);font-size:13px;margin-top:8px}
+  pre{white-space:pre-wrap;word-break:break-word;font-family:inherit;font-size:14px;
+      background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:12px;
+      max-height:48vh;overflow:auto;margin:8px 0 0}
+  .muted{color:var(--muted);font-size:13px}
+  .hide{display:none}
+  details>summary{cursor:pointer;font-size:14px;color:var(--muted);margin-top:10px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>會議錄音轉寫</h1>
+
+  <!-- 設定：伺服器位址與金鑰只存在這台裝置的瀏覽器 -->
+  <div class="card" id="setupCard">
+    <strong>設定</strong>
+    <div class="muted">兩項都只存在這台裝置的瀏覽器裡，不會送到別處，也不在這個網頁的原始碼裡。</div>
+    <label>伺服器位址（結尾是 /webhook）</label>
+    <input type="text" id="baseUrl" placeholder="https://你的-n8n/webhook" autocomplete="off">
+    <label>存取密碼（X-API-Key）</label>
+    <input type="password" id="apiKey" autocomplete="off">
+    <div style="margin-top:12px;display:flex;gap:8px">
+      <button id="saveCfg">儲存</button>
+      <button class="ghost" id="closeCfg">取消</button>
+    </div>
+  </div>
+
+  <div class="card" id="uploadCard">
+    <div class="drop" id="drop">
+      <div><strong>點這裡選音檔</strong>，或拖曳進來</div>
+      <div class="muted" style="margin-top:6px">支援 m4a / mp3 / mp4 / wav</div>
+    </div>
+    <input type="file" id="file" accept="audio/*,video/mp4,.m4a,.mp3,.wav" class="hide">
+    <div id="picked" class="hide" style="margin-top:12px">
+      <div class="row"><span id="pickedName"></span><span id="pickedSize"></span></div>
+      <div style="margin-top:10px;display:flex;gap:8px">
+        <button id="send">開始轉寫</button>
+        <button class="ghost" id="clearPick">換一個</button>
+      </div>
+    </div>
+    <div id="upWrap" class="hide">
+      <div class="bar"><i id="upBar"></i></div>
+      <div class="row"><span>上傳中…</span><span id="upPct">0%</span></div>
+    </div>
+    <div style="margin-top:12px"><button class="ghost" id="openCfg">設定</button></div>
+  </div>
+
+  <div id="jobs"></div>
+</div>
+
+<script>
+// ---- 設定 -------------------------------------------------------------
+// 這個 repo 是公開的（GitHub Pages 的站台一律公開，即使 repo 設 private），
+// 所以位址和金鑰都不寫在程式碼裡，由使用者第一次開啟時輸入、存在 localStorage。
+const CFG = 'mm.cfg', JOBS = 'mm.jobs';
+const $ = s => document.querySelector(s);
+
+function cfg(){ try { return JSON.parse(localStorage.getItem(CFG)) || {}; } catch(e){ return {}; } }
+function setCfg(c){ try { localStorage.setItem(CFG, JSON.stringify(c)); } catch(e){} }
+function jobs(){ try { return JSON.parse(localStorage.getItem(JOBS)) || []; } catch(e){ return []; } }
+function setJobs(j){ try { localStorage.setItem(JOBS, JSON.stringify(j.slice(0,10))); } catch(e){} }
+
+function showCfg(on){
+  document.getElementById('setupCard').style.display = on ? '' : 'none';
+  document.getElementById('uploadCard').style.display = on ? 'none' : '';
+}
+(function initCfg(){
+  const c = cfg();
+  $('#baseUrl').value = c.base || '';
+  $('#apiKey').value  = c.key  || '';
+  showCfg(!(c.base && c.key));
+})();
+$('#openCfg').onclick  = () => showCfg(true);
+$('#closeCfg').onclick = () => { const c = cfg(); if (c.base && c.key) showCfg(false); };
+$('#saveCfg').onclick  = () => {
+  const base = $('#baseUrl').value.trim().replace(/\/+$/, '');
+  const key  = $('#apiKey').value.trim();
+  if (!base || !key) { alert('兩項都要填'); return; }
+  setCfg({ base: base, key: key });
+  showCfg(false);
+  render();
+};
+
+// ---- 小工具 -----------------------------------------------------------
+const fmtSize = b => b > 1048576 ? (b / 1048576).toFixed(1) + ' MB' : Math.round(b / 1024) + ' KB';
+function fmtDur(s){
+  if (s === null || s === undefined || !isFinite(s)) return '—';
+  s = Math.max(0, Math.round(s));
+  const m = Math.floor(s / 60), r = s % 60;
+  return m ? (m + ' 分 ' + r + ' 秒') : (r + ' 秒');
+}
+function api(path, opts){
+  const c = cfg();
+  return fetch(c.base + path, Object.assign({ headers: { 'X-API-Key': c.key } }, opts || {}));
+}
+
+// ---- 上傳 -------------------------------------------------------------
+let picked = null;
+$('#drop').onclick = () => $('#file').click();
+$('#drop').ondragover = e => { e.preventDefault(); $('#drop').classList.add('over'); };
+$('#drop').ondragleave = () => $('#drop').classList.remove('over');
+$('#drop').ondrop = e => {
+  e.preventDefault(); $('#drop').classList.remove('over');
+  if (e.dataTransfer.files[0]) pick(e.dataTransfer.files[0]);
+};
+$('#file').onchange = e => { if (e.target.files[0]) pick(e.target.files[0]); };
+$('#clearPick').onclick = () => {
+  picked = null; $('#picked').classList.add('hide'); $('#file').value = '';
+};
+
+function pick(f){
+  picked = f;
+  $('#pickedName').textContent = f.name;
+  $('#pickedSize').textContent = fmtSize(f.size);
+  $('#picked').classList.remove('hide');
+}
+
+$('#send').onclick = () => {
+  if (!picked) return;
+  const c = cfg();
+  const fd = new FormData();
+  fd.append('audio', picked, picked.name);
+
+  // 用 XHR 而不是 fetch：fetch 沒有上傳進度事件。
+  // 一小時的錄音可能幾十 MB，上傳本身就要等，沒有進度條會讓人以為當掉了。
+  const xhr = new XMLHttpRequest();
+  xhr.open('POST', c.base + '/audio-submit');
+  xhr.setRequestHeader('X-API-Key', c.key);
+  $('#upWrap').classList.remove('hide');
+  $('#send').disabled = true;
+
+  xhr.upload.onprogress = e => {
+    if (!e.lengthComputable) return;
+    const p = Math.round(e.loaded / e.total * 100);
+    $('#upBar').style.width = p + '%';
+    $('#upPct').textContent = p + '%';
+  };
+  xhr.onload = () => {
+    $('#send').disabled = false;
+    $('#upWrap').classList.add('hide');
+    $('#upBar').style.width = '0';
+    if (xhr.status === 413) {
+      alert('檔案太大，n8n 擋下了（HTTP 413）。要調高 n8n 的 N8N_PAYLOAD_SIZE_MAX。');
+      return;
+    }
+    if (xhr.status === 401) { alert('存取密碼不對（401）。'); return; }
+    if (xhr.status < 200 || xhr.status >= 300) {
+      alert('上傳失敗：HTTP ' + xhr.status + '\n' + String(xhr.responseText).slice(0, 300));
+      return;
+    }
+    let r;
+    try { r = JSON.parse(xhr.responseText); }
+    catch(e){ alert('回應不是 JSON：' + String(xhr.responseText).slice(0, 200)); return; }
+    if (!r.job_id) { alert('回應裡沒有 job_id'); return; }
+
+    const list = jobs();
+    list.unshift({ job_id: r.job_id, filename: picked.name, at: Date.now(),
+                   duration: r.duration || null, last: r, lastChange: Date.now() });
+    setJobs(list);
+    picked = null; $('#picked').classList.add('hide'); $('#file').value = '';
+    render(); poll(r.job_id);
+  };
+  xhr.onerror = () => {
+    $('#send').disabled = false; $('#upWrap').classList.add('hide');
+    alert('連不上伺服器。檢查位址，以及這台裝置是不是在 tailnet 裡。');
+  };
+  xhr.send(fd);
+};
+
+// ---- 輪詢 -------------------------------------------------------------
+const timers = {};
+
+function poll(id){
+  if (timers[id]) return;
+  const tick = async () => {
+    let s;
+    try {
+      const res = await api('/audio-status?job_id=' + encodeURIComponent(id));
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      s = await res.json();
+    } catch (e) {
+      upd(id, j => { j.netErr = String(e.message || e); });
+      render();
+      return;                                   // 下一輪再試，不中斷輪詢
+    }
+    upd(id, j => {
+      j.netErr = null;
+      // 進度有變化才更新時間戳，停滯偵測靠它 —— 這是「有沒有當機」的唯一線索
+      const moved = !j.last || j.last.status !== s.status ||
+                    (s.progress || 0) > (j.last.progress || 0);
+      if (moved) j.lastChange = Date.now();
+      j.last = s;
+      if (s.duration) j.duration = s.duration;
+    });
+    render();
+
+    if (s.status === 'done')  { stop(id); fetchResult(id); return; }
+    if (s.status === 'error') { stop(id); return; }
+  };
+  tick();
+  timers[id] = setInterval(tick, 5000);
+}
+
+function stop(id){
+  if (timers[id]) { clearInterval(timers[id]); delete timers[id]; }
+}
+
+// 會議紀錄是核心子流程跑完才寫進資料表的，轉寫 done 的瞬間通常還沒有，
+// 所以這裡要自己重試，而不是一次拿不到就當作沒有。
+async function fetchResult(id, tries){
+  tries = tries || 0;
+  try {
+    const res = await api('/audio-result?job_id=' + encodeURIComponent(id));
+    if (res.ok) {
+      const r = await res.json();
+      if (r && r.minutes_zh) {
+        upd(id, j => { j.minutes = r.minutes_zh; });
+        render();
+        return;
+      }
+    }
+  } catch (e) { /* 落到下面重試 */ }
+  if (tries < 40) setTimeout(() => fetchResult(id, tries + 1), 15000);
+  else { upd(id, j => { j.minutesTimeout = true; }); render(); }
+}
+
+function upd(id, fn){
+  const list = jobs();
+  const j = list.find(x => x.job_id === id);
+  if (j) { fn(j); setJobs(list); }
+}
+
+// ---- 畫面 -------------------------------------------------------------
+function render(){
+  const list = jobs();
+  document.getElementById('jobs').innerHTML = list.map(card).join('');
+  list.forEach(j => {
+    const b = document.querySelector('[data-del="' + j.job_id + '"]');
+    if (b) b.onclick = () => {
+      setJobs(jobs().filter(x => x.job_id !== j.job_id));
+      stop(j.job_id);
+      render();
+    };
+  });
+}
+
+function card(j){
+  const s = j.last || {};
+  const st = s.status || 'queued';
+  const pct = Math.round((s.progress || 0) * 100);
+  const exact = s.progress_exact;
+
+  let pill = '<span class="pill">排隊中</span>';
+  if (st === 'running') pill = '<span class="pill run">轉寫中</span>';
+  if (st === 'done')    pill = '<span class="pill ok">完成</span>';
+  if (st === 'error')   pill = '<span class="pill err">失敗</span>';
+
+  let detail = '';
+  if (st === 'queued') {
+    detail = '<div class="row"><span>前面還有 ' +
+             (s.ahead === undefined || s.ahead === null ? '?' : s.ahead) + ' 件</span>' +
+             '<span>約 ' + fmtDur(s.eta_start) + ' 後開始</span></div>';
+  } else if (st === 'running') {
+    detail = '<div class="bar ' + (exact ? '' : 'est') + '"><i style="width:' + pct + '%"></i></div>' +
+             '<div class="row"><span>' + pct + '%' + (exact ? '' : '（推估）') + '</span>' +
+             '<span>剩約 ' + fmtDur(s.eta) + '</span></div>';
+  } else if (st === 'done') {
+    detail = '<div class="row"><span>音檔 ' + fmtDur(s.duration) + '</span>' +
+             '<span>轉寫耗時 ' + fmtDur(s.elapsed) + '（' + (s.rtf || '?') + 'x）</span></div>';
+  } else if (st === 'error') {
+    detail = '<div class="warn">' + esc(s.error || '未知錯誤') + '</div>';
+  }
+
+  // 停滯警告：進度超過 3 分鐘沒動，提醒去確認服務還在不在
+  let stall = '';
+  const idle = (Date.now() - (j.lastChange || j.at)) / 1000;
+  if ((st === 'running' || st === 'queued') && idle > 180) {
+    stall = '<div class="warn">⚠ 進度已 ' + fmtDur(idle) +
+            ' 沒有變化，可能是服務停了，建議確認 GTR7 的 whisper 服務。</div>';
+  }
+  if (j.netErr) {
+    stall += '<div class="warn">⚠ 連線問題：' + esc(j.netErr) + '（會自動重試）</div>';
+  }
+
+  let out = '';
+  if (st === 'done') {
+    if (j.minutes) {
+      out = '<details open><summary>會議紀錄（已發到 Telegram）</summary><pre>' +
+            esc(j.minutes) + '</pre></details>';
+    } else if (j.minutesTimeout) {
+      out = '<div class="warn">會議紀錄遲遲沒出現，去 n8n 看「會議紀錄產出核心」這條有沒有出錯。</div>';
+    } else {
+      out = '<div class="muted" style="margin-top:8px">轉寫完成，Claude 正在整理會議紀錄…（約 1 分鐘）</div>';
+    }
+    if (s.text) out += '<details><summary>逐字稿</summary><pre>' + esc(s.text) + '</pre></details>';
+  }
+
+  return '<div class="card">' +
+    '<div class="row" style="align-items:center">' +
+      '<strong style="color:var(--ink)">' + esc(j.filename || '(未命名)') + '</strong>' + pill +
+    '</div>' +
+    detail + stall + out +
+    '<div style="margin-top:10px"><button class="ghost" data-del="' + j.job_id + '">移除這筆</button></div>' +
+  '</div>';
+}
+
+function esc(s){
+  return String(s === null || s === undefined ? '' : s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+// 重開頁面時把還沒結束的工作接回來繼續輪詢
+render();
+jobs().forEach(j => {
+  const st = (j.last || {}).status;
+  if (st !== 'done' && st !== 'error') poll(j.job_id);
+  else if (st === 'done' && !j.minutes && !j.minutesTimeout) fetchResult(j.job_id);
+});
+
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('sw.js').catch(() => {});
+}
+</script>
+</body>
+</html>
