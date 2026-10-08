@@ -205,7 +205,7 @@ $('#send').onclick = () => {
   };
   xhr.onerror = () => {
     $('#send').disabled = false; $('#upWrap').classList.add('hide');
-    alert('連不上伺服器。檢查位址，以及這台裝置是不是在 tailnet 裡。');
+    alert('連不上伺服器。檢查「設定」裡的伺服器位址；若你的 n8n 只開放給 tailnet，這台裝置也要在 tailnet 裡。');
   };
   xhr.send(fd);
 };
